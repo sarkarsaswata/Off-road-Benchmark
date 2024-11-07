@@ -12,6 +12,8 @@ import os
 import sys
 import random
 import weakref
+
+from sklearn.metrics import median_absolute_error
 from carla_game.waypoints.waypoints import *
 from common.utills import numpy_imwrite
 import cv2
@@ -33,6 +35,7 @@ except IndexError:
 
 try:
     import pygame
+    from pygame.locals import K_UP, K_DOWN, K_LEFT, K_RIGHT, K_SPACE, K_q, K_m, K_a, K_d, K_w, K_s
 except ImportError:
     raise RuntimeError('cannot import pygame, make sure pygame package is installed')
 
@@ -296,43 +299,71 @@ class CarlaEnv(object):
         # Load the map you want
         self.world = self.client.load_world(self.city_name)
 
-    def step(self, action, timeout=2.0):
-        # observation
-        measurement, sensor_data = self.tick(timeout)
+    def step(self, action=None, timeout=2.0):
+        """
+        Enhanced step function to integrate continuous manual keyboard control using Pygame.
+        """
+        # Initialize Pygame if it hasn't been initialized
+        if not pygame.get_init():
+            pygame.init()
+            pygame.display.set_mode((400, 300))  # Create a dummy display
 
-        # apply action to environment
-        if type(action) == torch.Tensor:
-            action = action.squeeze(0).detach().numpy().tolist()
-        elif type(action) == np.ndarray:
-            action = action.tolist()
-        if len(action) == 2:
-            self._control.steer = action[1]
-            self._control.throttle = action[0]
-        elif len(action) == 3:
-            self._control.brake = action[2]
-            self._control.steer = action[1]
-            self._control.throttle = action[0]
-        elif len(action) == 1:
-            self._control.steer = action[0]
-            self._control.throttle = 0.5
-            self._control.brake = 0
+        # Ensure the control object exists
+        if self._control is None:
+            self._control = carla.VehicleControl()
+            
+        # Autopilot setting (if applicable)
+        if getattr(self, "_autopilot_enabled", False):
+            self.vehicle.set_autopilot(True)
         else:
-            raise ValueError("Not match action size")
+            self.vehicle.set_autopilot(False)
 
-        if self._control.throttle < 0:
-            self._control.reverse = True
+        # Poll Pygame events
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                return None, None, True, None  # Exit if quit event
+            elif event.type == pygame.KEYUP:
+                if event.key == K_q:
+                    # Toggle reverse
+                    self._control.gear = 1 if self._control.reverse else -1
+                elif event.key == K_m:
+                    # Toggle manual gear shift
+                    self._control.manual_gear_shift = not self._control.manual_gear_shift
+
+        # Get key states
+        keys = pygame.key.get_pressed()
+        throttle = 1.0 if keys[K_UP] or keys[K_w] else 0.0
+        brake = 1.0 if keys[K_DOWN] or keys[K_s] else 0.0
+        hand_brake = keys[K_SPACE]
+        steer_increment = 0.05  # Rate at which to adjust steering
+        if keys[K_LEFT] or keys[K_a]:
+            self._control.steer = max(-0.7, self._control.steer - steer_increment)
+        elif keys[K_RIGHT] or keys[K_d]:
+            self._control.steer = min(0.7, self._control.steer + steer_increment)
         else:
-            self._control.reverse = False
+            self._control.steer *= 0.9  # Gradually return to center
 
+        # Update control based on input
+        self._control.throttle = throttle
+        self._control.brake = brake
+        self._control.hand_brake = hand_brake
+
+        # Apply the updated control
         self.vehicle.apply_control(self._control)
 
+        # Collect sensor data and measurements as in the original step
+        measurement, sensor_data = self.tick(timeout)
+
+        # Update episode info, calculate reward, and check if done
         self.update_epinfos(measurement)
-        self.epinfos["action"] = action
+        self.epinfos["action"] = [self._control.throttle, self._control.steer, self._control.brake]
         reward, done = self.get_reward_done(self.epinfos)
         self.observation = (measurement, sensor_data)
 
+        # Return the processed observation, reward, done flag, and episode info
         return self.preprocess_observation(self.observation), reward, done, self.epinfos
-
+    
     def reset_epinfos(self):
         self.epinfos = {
             "location": np.array(self.init_pos["pos"][0:2]),

@@ -1033,7 +1033,7 @@ class CameraManager(object):
 
 
 def game_loop(args):
-    # 데이터 셋 저장을 위한 디렉토리 생성 -> dataset1
+    # Create a directory to store the data set -> dataset1
     if os.path.exists(const.SAVE_PATH) is not True:
         os.makedirs(const.SAVE_PATH)
     # 차량관련 정보를 저장하기 위한 csv 파일 생성
@@ -1049,10 +1049,10 @@ def game_loop(args):
     step = 0
 
     try:
-        # 클라이언트 생성
+        # Create a client
         client = carla.Client(args.host, args.port)
         client.set_timeout(2.0)
-        # 날씨는 맑은 날로 고정
+        # The weather is set to be clear
         client.load_world(args.env_name)
         client.get_world().set_weather(carla.WeatherParameters.ClearNoon)
 
@@ -1063,8 +1063,8 @@ def game_loop(args):
         hud = HUD(args.width, args.height)
         
         world = World(client.get_world(), hud, args)
-        # args.autopilot : True  차량에이전트 제어를 autopilot 기능이 담당
-        #                  False 차량에이전트 제어를 키보드로 담당
+        # args.autopilot : True  The autopilot function is responsible for vehicle agent control.
+        #                  False Control vehicle agent with keyboard
         controller = KeyboardControl(world, args.autopilot)
         
 
@@ -1079,7 +1079,7 @@ def game_loop(args):
             if controller.parse_events(client, world, clock):
                 return
 
-            # 데이터들을 저장
+            # Save data
             c = world.player.get_control()
 
             #filter data
